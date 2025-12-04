@@ -344,44 +344,53 @@
          * @returns {string} - 추출된 내용 또는 에러 메시지
          */
         function extractSection(responseText, sectionName) {
-             const escapedSectionName = sectionName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-             
-             // 1. 섹션 헤더의 시작점을 찾습니다. (유연하게 찾기 위해 헤더 앞에 공백/줄바꿈 모두 허용)
-             const headerRegex = new RegExp(`[\\s\\S]${escapedSectionName}\\s*`, 'i');
-             const headerMatch = responseText.match(headerRegex);
+            if (typeof responseText !== 'string' || typeof sectionName !== 'string') {
+                return `[${sectionName || '섹션'} 추출 실패: 입력 누락]`;
+            }
 
-             if (!headerMatch) {
-                 // 1단계 실패: 헤더를 찾지 못함 (원본 텍스트 반환)
-                 return responseText;
-             }
+            const normalizeKey = (value) => value.replace(/\s+/g, '').toLowerCase();
+            const targetKey = normalizeKey(sectionName);
 
-             // 2. 섹션 내용의 시작 인덱스 (헤더 길이 + 매치된 공백 길이)
-             const startIndex = headerMatch.index + headerMatch[0].length;
+            // 1) 줄바꿈 통일 및 트림
+            const normalizedText = responseText.replace(/\r\n?/g, '\n').trim();
+            const lines = normalizedText.split('\n');
 
-             // 3. 다음 섹션 헤더의 시작 인덱스를 찾습니다. (다음 섹션의 시작은 '[' 문자)
-             const nextSectionRegex = new RegExp(`\\s*\\[`, 'g');
-             nextSectionRegex.lastIndex = startIndex; // 검색 시작점을 현재 섹션 내용 직후로 설정
+            // 2) 헤더를 탐색하며 섹션을 맵으로 구성
+            const sectionMap = new Map();
+            let currentKey = null;
 
-             let nextMatch = nextSectionRegex.exec(responseText);
-             let nextSectionIndex = nextMatch ? nextMatch.index : -1;
-             
-             let sectionContent;
-             if (nextSectionIndex === -1) {
-                 // 다음 섹션이 없으면 문자열 끝까지 가져옴
-                 sectionContent = responseText.substring(startIndex);
-             } else {
-                 // 다음 섹션이 있으면 그 직전까지 가져옴
-                 sectionContent = responseText.substring(startIndex, nextSectionIndex);
-             }
-             
-             // [최종 수정] 내용이 비어 있을 때 (빈 문자열이거나 공백만 있는 경우) 오류 반환
-             if (sectionContent.trim().length === 0) {
-                 // **[수정] 가사 내용이 비어 있을 때 (LLM의 회피) 복사 실패 메시지 반환**
-                 return `[${sectionName} 추출 실패: 내용이 비어 있음]`;
-             }
+            lines.forEach((line) => {
+                const headerMatch = line.match(/^\s*\[(.+?)\]\s*$/);
+                if (headerMatch) {
+                    const headerLabel = `[${headerMatch[1].trim()}]`;
+                    currentKey = normalizeKey(headerLabel);
+                    if (!sectionMap.has(currentKey)) {
+                        sectionMap.set(currentKey, []);
+                    }
+                    return;
+                }
 
-             return sectionContent.trim();
+                if (currentKey) {
+                    sectionMap.get(currentKey).push(line);
+                }
+            });
+
+            // 3) 대상 섹션 추출
+            const targetContent = sectionMap.get(targetKey);
+
+            if (!targetContent || targetContent.length === 0) {
+                return `[${sectionName} 추출 실패: 섹션을 찾을 수 없습니다.]`;
+            }
+
+            const content = targetContent.join('\n').trim();
+
+            if (!content) {
+                return `[${sectionName} 추출 실패: 내용이 비어 있음]`;
+            }
+
+            return content;
         }
+
 
 
         /**
